@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard | Cadena de Frío</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
+    <style>
+        body {
+            background-color: #f4f6f9;
+        }
+
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+
+        .val-display {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        .status-indicator {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .status-online {
+            background-color: #198754;
+            box-shadow: 0 0 8px #198754;
+        }
+
+        .status-offline {
+            background-color: #dc3545;
+        }
+
+        #alarm-banner {
+            z-index: 1050;
+            top: 1rem;
+            box-shadow: 0 10px 20px rgba(220, 53, 69, 0.3);
+        }
+
+        #ambiente-banner {
+            z-index: 1040;
+            top: 11rem;
+            box-shadow: 0 10px 20px rgba(255, 193, 7, 0.3);
+        }
+    </style>
+</head>
+
+<body>
+
+<!-- =====================================================
+     ALERTA CRÍTICA: PRODUCTO FUERA DE RANGO
+     Esta alerta SÍ activa sonido y muestra botón para detener.
+===================================================== -->
+<div id="alarm-banner"
+     class="alert alert-danger d-none position-fixed start-50 translate-middle-x w-75 text-center"
+     role="alert">
+
+    <h3 class="alert-heading fw-bold">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        ¡ALERTA CRÍTICA EN PRODUCTO!
+    </h3>
+
+    <p class="fs-5 mb-3" id="alarm-producto-text">
+        La temperatura del producto está fuera del rango permitido.
+    </p>
+
+    <button type="button" class="btn btn-dark btn-lg fw-bold" onclick="silenciarAlarma()">
+        <i class="bi bi-bell-slash-fill"></i> Detener Alarma
+    </button>
+</div>
+
+<!-- =====================================================
+     ALERTA VISUAL: AMBIENTE FUERA DE RANGO
+     Esta alerta NO activa sonido.
+===================================================== -->
+<div id="ambiente-banner"
+     class="alert alert-warning d-none position-fixed start-50 translate-middle-x w-75 text-center"
+     role="alert">
+
+    <button type="button"
+            class="btn-close position-absolute top-0 end-0 m-3"
+            aria-label="Cerrar"
+            onclick="cerrarAlertaAmbiente()">
+    </button>
+
+    <h4 class="alert-heading fw-bold">
+        <i class="bi bi-thermometer-high"></i>
+        Alerta visual de ambiente
+    </h4>
+
+    <p class="fs-6 mb-0" id="ambiente-alert-text">
+        La temperatura ambiente está fuera del rango permitido.
+    </p>
+</div>
+
+<nav class="navbar navbar-dark bg-dark mb-4">
+    <div class="container-fluid">
+        <span class="navbar-brand mb-0 h1">
+            <i class="bi bi-thermometer-snow"></i>
+            Monitoreo de Cadena de Frío
+        </span>
+
+        <div>
+            <button id="btn-activar-audio"
+                    class="btn btn-outline-light btn-sm me-3"
+                    onclick="inicializarAudio()">
+                <i class="bi bi-volume-mute-fill"></i> Activar Sonido
+            </button>
+
+            <span class="text-white">
+                MQTT:
+                <span id="mqtt-status" class="status-indicator status-offline ms-1"></span>
+            </span>
+        </div>
+    </div>
+</nav>
+
+<div class="container">
+
+    <!-- =====================================================
+         ESTADO GENERAL
+    ====================================================== -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card bg-primary text-white" id="card-estado-general">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="card-title mb-0">Estado del Sistema</h5>
+                        <small id="device-id-display">Esperando datos...</small>
+                    </div>
+
+                    <h3 id="estado-text" class="mb-0">DESCONECTADO</h3>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- =====================================================
+         TARJETAS PRINCIPALES:
+         PRODUCTO, AMBIENTE Y PUERTA
+    ====================================================== -->
+    <div class="row mb-4">
+
+        <div class="col-md-4 mb-3">
+            <div class="card h-100 text-center" id="card-temp-producto">
+                <div class="card-body">
+                    <h5 class="card-title text-muted">Temperatura del Producto</h5>
+                    <div class="val-display my-3" id="temp-producto-val">-- °C</div>
+                    <p class="text-muted small" id="rango-producto-text">
+                        Rango: -- °C a -- °C
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <div class="card h-100 text-center" id="card-temp-ambiente">
+                <div class="card-body">
+                    <h5 class="card-title text-muted">Temperatura Ambiente</h5>
+                    <div class="val-display my-3" id="temp-ambiente-val">-- °C</div>
+                    <p class="text-muted small" id="rango-ambiente-text">
+                        Rango: -- °C a -- °C
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-3">
+            <div class="card h-100 text-center" id="card-puerta">
+                <div class="card-body">
+                    <h5 class="card-title text-muted">Estado de Puerta</h5>
+                    <div class="val-display my-3">
+                        <i id="puerta-icon" class="bi bi-door-closed text-secondary"></i>
+                    </div>
+                    <h4 id="puerta-text">Desconocido</h4>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- =====================================================
+         DIAGNÓSTICO Y REGISTRO DE ALERTAS
+    ====================================================== -->
+    <div class="row">
+
+        <div class="col-md-4 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-white">
+                    Diagnóstico de Hardware
+                </div>
+
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            DS18B20 Producto
+                            <span id="health-ds" class="badge bg-secondary rounded-pill">--</span>
+                        </li>
+
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            BMP280 Ambiente
+                            <span id="health-bmp" class="badge bg-secondary rounded-pill">--</span>
+                        </li>
+
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            MC38 Magnético
+                            <span id="health-mc" class="badge bg-secondary rounded-pill">--</span>
+                        </li>
+
+                    </ul>
+
+                    <div class="mt-3 text-muted small">
+                        Última actualización:
+                        <span id="last-update">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8 mb-3">
+            <div class="card h-100">
+                <div class="card-header bg-white text-danger fw-bold">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Registro de Alertas
+                </div>
+
+                <div class="card-body overflow-auto" style="max-height: 250px;">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>Hora</th>
+                                <th>Tipo de Alerta</th>
+                                <th>Producto</th>
+                                <th>Ambiente</th>
+                            </tr>
+                        </thead>
+
+                        <tbody id="alertas-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+
+<script>
+    // =====================================================
+    // 1. SINTETIZADOR DE AUDIO
+    // =====================================================
+
+    let audioCtx = null;
+    let intervaloAlarma = null;
+    let isAlarmActive = false;
+    let isMutedByUser = false;
+    let isAmbienteAlertClosedByUser = false;
+
+    function inicializarAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+
+        if (audioCtx.state === "suspended") {
+            audioCtx.resume();
+        }
+
+        const btn = document.getElementById("btn-activar-audio");
+        btn.classList.replace("btn-outline-light", "btn-success");
+        btn.innerHTML = '<i class="bi bi-volume-up-fill"></i> Audio Activado';
+    }
+
+    function hacerBeep() {
+        if (!audioCtx) return;
+
+        const oscillator = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        oscillator.type = "square";
+        oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+
+        gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+
+        oscillator.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        oscillator.start();
+
+        setTimeout(() => {
+            oscillator.stop();
+            oscillator.disconnect();
+        }, 200);
+    }
+
+    function encenderAlarmaSonora() {
+        if (!intervaloAlarma) {
+            intervaloAlarma = setInterval(hacerBeep, 500);
+        }
+    }
+
+    function apagarAlarmaSonora() {
+        if (intervaloAlarma) {
+            clearInterval(intervaloAlarma);
+            intervaloAlarma = null;
+        }
+    }
+
+    // =====================================================
+    // 2. LÓGICA DE ALERTAS
+    // =====================================================
+
+    const alarmBanner = document.getElementById("alarm-banner");
+    const ambienteBanner = document.getElementById("ambiente-banner");
+    const alarmProductoText = document.getElementById("alarm-producto-text");
+    const ambienteAlertText = document.getElementById("ambiente-alert-text");
+
+    function verificarAlarmaProducto(productoFueraRango, tempProducto, rangoProducto) {
+        if (productoFueraRango) {
+            const min = rangoProducto.min_c;
+            const max = rangoProducto.max_c;
+
+            alarmProductoText.innerText =
+                `La temperatura del producto está fuera del rango permitido ` +
+                `(${min} °C a ${max} °C). Valor actual: ${tempProducto.toFixed(1)} °C.`;
+
+            if (!isAlarmActive && !isMutedByUser) {
+                isAlarmActive = true;
+                alarmBanner.classList.remove("d-none");
+                encenderAlarmaSonora();
+            }
+
+        } else {
+            if (isAlarmActive || isMutedByUser) {
+                apagarAlarma();
+                isMutedByUser = false;
+            }
+        }
+    }
+
+    function verificarAlertaAmbiente(ambienteFueraRango, tempAmbiente, rangoAmbiente) {
+        if (ambienteFueraRango) {
+            const min = rangoAmbiente.min_c;
+            const max = rangoAmbiente.max_c;
+
+            ambienteAlertText.innerText =
+                `La temperatura ambiente está fuera del rango permitido ` +
+                `(${min} °C a ${max} °C). Valor actual: ${tempAmbiente.toFixed(1)} °C.`;
+
+            // Solo se muestra si el usuario no la cerró manualmente
+            if (!isAmbienteAlertClosedByUser) {
+                ambienteBanner.classList.remove("d-none");
+            }
+
+        } else {
+            // Cuando vuelve al rango normal, se reinicia el permiso para mostrarla otra vez
+            ambienteBanner.classList.add("d-none");
+            isAmbienteAlertClosedByUser = false;
+        }
+    }
+
+    function cerrarAlertaAmbiente() {
+        ambienteBanner.classList.add("d-none");
+        isAmbienteAlertClosedByUser = true;
+    }
+
+    function silenciarAlarma() {
+        apagarAlarma();
+        isMutedByUser = true;
+    }
+
+    function apagarAlarma() {
+        apagarAlarmaSonora();
+        alarmBanner.classList.add("d-none");
+        isAlarmActive = false;
+    }
+
+    // =====================================================
+    // 3. CONFIGURACIÓN MQTT
+    // =====================================================
+
+    const MQTT_BROKER = "192.168.1.107";
+    const MQTT_PORT = 9001;
+    const MQTT_PATH = "/mqtt";
+    const CLIENT_ID = "spa-dashboard-" + Math.random().toString(16).substr(2, 8);
+    const BASE_TOPIC = "escom/iot/equipoX/cadena_frio";
+
+    const client = new Paho.Client(
+        MQTT_BROKER,
+        Number(MQTT_PORT),
+        MQTT_PATH,
+        CLIENT_ID
+    );
+
+    // =====================================================
+    // 4. ELEMENTOS HTML
+    // =====================================================
+
+    const elStatus = document.getElementById("mqtt-status");
+    const elEstadoText = document.getElementById("estado-text");
+    const cardEstadoGeneral = document.getElementById("card-estado-general");
+
+    const elTempProductoVal = document.getElementById("temp-producto-val");
+    const elTempAmbienteVal = document.getElementById("temp-ambiente-val");
+
+    const cardTempProducto = document.getElementById("card-temp-producto");
+    const cardTempAmbiente = document.getElementById("card-temp-ambiente");
+
+    const elRangoProductoText = document.getElementById("rango-producto-text");
+    const elRangoAmbienteText = document.getElementById("rango-ambiente-text");
+
+    const elPuertaIcon = document.getElementById("puerta-icon");
+    const elPuertaText = document.getElementById("puerta-text");
+    const cardPuerta = document.getElementById("card-puerta");
+
+    const elHealthDs = document.getElementById("health-ds");
+    const elHealthBmp = document.getElementById("health-bmp");
+    const elHealthMc = document.getElementById("health-mc");
+
+    const elLastUpdate = document.getElementById("last-update");
+    const tbodyAlertas = document.getElementById("alertas-tbody");
+
+    // =====================================================
+    // 5. FUNCIONES AUXILIARES
+    // =====================================================
+
+    function toNumber(value) {
+        if (value === undefined || value === null || value === "") {
+            return null;
+        }
+
+        const numberValue = Number(value);
+
+        if (Number.isNaN(numberValue)) {
+            return null;
+        }
+
+        return numberValue;
+    }
+
+    function obtenerRangos(payload) {
+        const rangos = payload.rangos || {};
+
+        const producto = rangos.producto || {};
+        const ambiente = rangos.ambiente || {};
+
+        return {
+            producto: {
+                min_c: toNumber(producto.min_c) ?? 25.0,
+                max_c: toNumber(producto.max_c) ?? 35.0
+            },
+            ambiente: {
+                min_c: toNumber(ambiente.min_c) ?? 28.0,
+                max_c: toNumber(ambiente.max_c) ?? 33.0
+            }
+        };
+    }
+
+    function estaFueraDeRango(valor, rango) {
+        if (valor === null) return false;
+
+        return valor < rango.min_c || valor > rango.max_c;
+    }
+
+    function pintarTarjetaTemperatura(card, fueraRango) {
+        card.classList.remove(
+            "text-success",
+            "text-danger",
+            "border-success",
+            "border-danger",
+            "border-warning"
+        );
+
+        if (fueraRango) {
+            card.classList.add("text-danger", "border-danger");
+        } else {
+            card.classList.add("text-success", "border-success");
+        }
+    }
+
+    function actualizarBadgeSalud(el, esValido) {
+        el.innerText = esValido ? "OK" : "FALLO";
+        el.className = esValido
+            ? "badge bg-success rounded-pill"
+            : "badge bg-danger rounded-pill";
+    }
+
+    // =====================================================
+    // 6. CALLBACKS MQTT
+    // =====================================================
+
+    client.onConnectionLost = function(responseObject) {
+        elStatus.classList.replace("status-online", "status-offline");
+
+        setTimeout(connectMQTT, 5000);
+    };
+
+    client.onMessageArrived = function(message) {
+        try {
+            const payload = JSON.parse(message.payloadString);
+            const topic = message.destinationName;
+
+            if (topic.endsWith("/sensores")) {
+                actualizarSensores(payload);
+            } else if (topic.endsWith("/estado")) {
+                actualizarEstadoGeneral(payload);
+            } else if (topic.endsWith("/alertas")) {
+                registrarAlerta(payload);
+            }
+
+        } catch (e) {
+            console.error("Error parseando JSON", e);
+        }
+    };
+
+    function connectMQTT() {
+        client.connect({
+            timeout: 5,
+            keepAliveInterval: 30,
+            cleanSession: true,
+            useSSL: false,
+            mqttVersion: 4,
+
+            onSuccess: function() {
+                elStatus.classList.replace("status-offline", "status-online");
+                client.subscribe(BASE_TOPIC + "/#");
+            },
+
+            onFailure: function() {
+                setTimeout(connectMQTT, 5000);
+            }
+        });
+    }
+
+    // =====================================================
+    // 7. ACTUALIZAR DATOS DE SENSORES
+    // =====================================================
+
+    function actualizarSensores(payload) {
+        document.getElementById("device-id-display").innerText =
+            "Dispositivo: " + payload.device_id;
+
+        elLastUpdate.innerText = new Date(payload.timestamp).toLocaleTimeString();
+
+        const data = payload.data || {};
+        const valid = payload.valid || {};
+        const alertas = payload.alertas || {};
+        const rangos = obtenerRangos(payload);
+
+        const tempProducto = toNumber(data.temperatura_producto_c);
+        const tempAmbiente = toNumber(data.temperatura_ambiente_c);
+        const puerta = data.puerta;
+
+        elRangoProductoText.innerText =
+            `Rango: ${rangos.producto.min_c} °C a ${rangos.producto.max_c} °C`;
+
+        elRangoAmbienteText.innerText =
+            `Rango: ${rangos.ambiente.min_c} °C a ${rangos.ambiente.max_c} °C`;
+
+        // =================================================
+        // Temperatura del producto
+        // Si está fuera de rango:
+        // - muestra alerta crítica
+        // - suena alarma
+        // - aparece botón para detener
+        // =================================================
+
+        let productoFueraRango =
+            alertas.temperatura_producto_fuera_rango === true;
+
+        if (alertas.temperatura_producto_fuera_rango === undefined) {
+            productoFueraRango = estaFueraDeRango(
+                tempProducto,
+                rangos.producto
+            );
+        }
+
+        if (tempProducto !== null) {
+            elTempProductoVal.innerText = tempProducto.toFixed(1) + " °C";
+
+            pintarTarjetaTemperatura(
+                cardTempProducto,
+                productoFueraRango
+            );
+
+            verificarAlarmaProducto(
+                productoFueraRango,
+                tempProducto,
+                rangos.producto
+            );
+
+        } else {
+            elTempProductoVal.innerText = "-- °C";
+            cardTempProducto.classList.add("border-warning");
+            verificarAlarmaProducto(false, 0, rangos.producto);
+        }
+
+        // =================================================
+        // Temperatura ambiente
+        // Si está fuera de rango:
+        // - solo muestra alerta visual
+        // - NO suena alarma
+        // =================================================
+
+        let ambienteFueraRango =
+            alertas.temperatura_ambiente_fuera_rango === true;
+
+        if (alertas.temperatura_ambiente_fuera_rango === undefined) {
+            ambienteFueraRango = estaFueraDeRango(
+                tempAmbiente,
+                rangos.ambiente
+            );
+        }
+
+        if (tempAmbiente !== null) {
+            elTempAmbienteVal.innerText = tempAmbiente.toFixed(1) + " °C";
+
+            pintarTarjetaTemperatura(
+                cardTempAmbiente,
+                ambienteFueraRango
+            );
+
+            verificarAlertaAmbiente(
+                ambienteFueraRango,
+                tempAmbiente,
+                rangos.ambiente
+            );
+
+        } else {
+            elTempAmbienteVal.innerText = "-- °C";
+            cardTempAmbiente.classList.add("border-warning");
+            ambienteBanner.classList.add("d-none");
+        }
+
+        // =================================================
+        // Puerta
+        // =================================================
+
+        if (puerta === "abierta") {
+            elPuertaIcon.className = "bi bi-door-open-fill text-danger";
+            elPuertaText.innerText = "ABIERTA";
+            cardPuerta.classList.add("border-danger");
+        } else if (puerta === "cerrada") {
+            elPuertaIcon.className = "bi bi-door-closed-fill text-success";
+            elPuertaText.innerText = "CERRADA";
+            cardPuerta.classList.remove("border-danger");
+        } else {
+            elPuertaIcon.className = "bi bi-door-closed text-secondary";
+            elPuertaText.innerText = "Desconocido";
+            cardPuerta.classList.remove("border-danger");
+        }
+
+        actualizarBadgeSalud(elHealthDs, valid.ds18b20);
+        actualizarBadgeSalud(elHealthBmp, valid.bmp280);
+        actualizarBadgeSalud(elHealthMc, valid.mc38);
+    }
+
+    // =====================================================
+    // 8. ACTUALIZAR ESTADO GENERAL
+    // =====================================================
+
+    function actualizarEstadoGeneral(payload) {
+        const estado = payload.estado || "DESCONOCIDO";
+
+        elEstadoText.innerText = estado.replace(/_/g, " ");
+
+        cardEstadoGeneral.className = "card text-white";
+
+        if (estado === "NORMAL") {
+            cardEstadoGeneral.classList.add("bg-success");
+        } else if (estado === "ALERTA_GENERAL" || estado === "ERROR_SENSOR") {
+            cardEstadoGeneral.classList.add("bg-danger");
+        } else if (estado.includes("PRODUCTO")) {
+            cardEstadoGeneral.classList.add("bg-danger");
+        } else if (estado.includes("AMBIENTE")) {
+            cardEstadoGeneral.classList.add("bg-warning", "text-dark");
+        } else if (estado.includes("PUERTA")) {
+            cardEstadoGeneral.classList.add("bg-warning", "text-dark");
+        } else {
+            cardEstadoGeneral.classList.add("bg-secondary");
+        }
+    }
+
+    // =====================================================
+    // 9. REGISTRO DE ALERTAS
+    // =====================================================
+
+    function registrarAlerta(payload) {
+        const tr = document.createElement("tr");
+
+        const data = payload.data || {};
+
+        const tempProducto = toNumber(data.temperatura_producto_c);
+        const tempAmbiente = toNumber(data.temperatura_ambiente_c);
+
+        const productoTexto =
+            tempProducto !== null
+                ? tempProducto.toFixed(1) + " °C"
+                : "N/A";
+
+        const ambienteTexto =
+            tempAmbiente !== null
+                ? tempAmbiente.toFixed(1) + " °C"
+                : "N/A";
+
+        const estado = payload.estado || "ALERTA";
+
+        tr.innerHTML = `
+            <td>${new Date(payload.timestamp).toLocaleTimeString()}</td>
+            <td><strong>${estado.replace(/_/g, " ")}</strong></td>
+            <td>${productoTexto}</td>
+            <td>${ambienteTexto}</td>
+        `;
+
+        tbodyAlertas.prepend(tr);
+
+        if (tbodyAlertas.children.length > 10) {
+            tbodyAlertas.removeChild(tbodyAlertas.lastChild);
+        }
+    }
+
+    window.onload = connectMQTT;
+</script>
+
+</body>
+</html>
